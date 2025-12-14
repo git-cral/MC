@@ -1,0 +1,58 @@
+nc: 4 # number of classes
+scales: # model compound scaling constants, i.e. 'model=yolov8n.yaml' will call yolov8.yaml with scale 'n'
+  # [depth, width, max_channels]
+  l: [1.00, 1.00, 1024]
+
+# YOLOv8.0n backbone
+backbone:
+
+  # [from, number, module, args]
+  - [-1, 1, Conv, [32, 3, 2]]                            # 0-P1/2
+  - [-1, 1, EG_stem, []]                                 # 1
+  - [1, 1, Eage_detect, []]                              # 2 (修正了拼写)
+  - [1, 1, Conv, [64, 3, 2]]                             # 3-P2/4
+  - [-1, 1, EGA, [64]]                                   # 4
+  - [-1, 1, DenseRepViTBlock_, [64, 64, 3, False, 1, False]] # 5
+  - [[2, -1], 1, Edge_guide, [64]]                       # 6
+  - [[5, -1], 1, Fuse_Features, [64]]                    # 7
+
+  - [-1, 1, RepViTBlock, [128, True, 2, False]]          # 8
+  # (已删除原第9层 DenseRepViTBlock_)
+  - [[8, 6], 1, Fuse_Features, [128]]                    # 9 (原第10层)
+  
+  - [-1, 1, RepViTBlock, [256, False, 2]]                # 10 (原第11层)
+  - [-1, 1, DenseRepViTBlock, [256, 256, 3, True]]        # 11 (原第12层)
+  # (已删除原第13层 DenseRepViTBlock)
+  - [[11, 9], 1, Fuse_Features, [256]]                   # 12 (原第14层, 连接从12改为11)
+
+  - [-1, 1, RepViTBlock, [512, False, 2]]                # 13 (原第15层)
+  # (已删除原第16层 DenseRepViTBlock_)
+  - [[13, 12], 1, Fuse_Features, [512]]                   # 14 (原第17层, 连接从15改为13)
+
+  - [-1, 1, SPPF, [512, 5]]                              # 15 (原第18层)
+  - [-1, 1, PSA, [512]]                                  # 16 (原第19层)
+
+# Head Configuration
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]           # 17 (原第20层)
+  - [[-1, 12], 1, Concat, [1]]                           # 18 (原第21层, 连接从14改为12)
+  - [-1, 1, Conv, [256, 1, 1]]                           # 19
+  - [-1, 1, Context_Exploration_Block, []]               # 20 (P4/16-medium的来源)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]           # 21
+  - [[-1, 9], 1, Concat, [1]]                            # 22 (原第25层, 连接从10改为9)
+  - [-1, 1, Conv, [128, 1, 1]]                           # 23
+  - [-1, 1, Context_Exploration_Block, []]               # 24 (P3/8-small的来源)
+
+  - [-1, 1, Conv, [256, 3, 2]]                           # 25
+  - [[-1, 20], 1, Concat, [1]]                           # 26 (原第29层, 连接从23改为20)
+  - [-1, 1, Conv, [256, 1, 1]]                           # 27
+  - [-1, 1, Context_Exploration_Block, []]               # 28 (P4/16-medium)
+
+  - [-1, 1, SCDown, [512, 3, 2]]                         # 29
+  - [[-1, 16], 1, Concat, [1]]                           # 30 (原第33层, 连接从19改为16)
+  - [-1, 1, Conv, [512, 1, 1]]                           # 31
+  - [-1, 1, Context_Exploration_Block, []]               # 32 (P5/32-large)
+
+  # Detect Layer
+  - [[24, 28, 32], 1, v10Detect, [nc]]  # Detect(P3, P4, P5), (连接从[27,31,35]改为[24,28,32])

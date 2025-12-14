@@ -1,0 +1,44 @@
+nc: 4
+scales:
+  l: [1.00, 1.00, 1024]
+
+backbone:
+  # [from, number, module, args]
+  - [-1, 1, Conv, [32, 3, 2]]                                # 0-P1/2
+  - [-1, 1, EG_stem, []]                                     # 1
+  - [1, 1, Eage_detect, []]                                  # 2 
+  - [1, 1, Conv, [64, 3, 2]]                                 # 3-P2/4
+  - [-1, 1, EGA, [64]]                                       # 4
+  - [-1, 1, DenseRepViTBlock_, [64, 64, 3, False, 1, False]]   # 5
+  - [[2, -1], 1, Edge_guide, [64]]                           # 6
+  - [[5, -1], 1, Fuse_Features, [64]]                        # 7
+  - [-1, 1, RepViTBlock, [128, True, 2, False]]              # 8
+  - [-1, 1, DenseRepViTBlock_, [128, 128, 3, False, 1, False]] # 9
+  - [[-1, 6], 1, Fuse_Features, [128]]                       # 10
+  - [-1, 1, RepViTBlock, [256, False, 2]]                    # 11
+  - [-1, 1, DenseRepViTBlock, [256, 256, 3, True]]            # 12
+  - [[-1, 6], 1, Fuse_Features, [256]]                       # 13 (原第14层)
+  - [-1, 1, RepViTBlock, [512, False, 2]]                    # 14 (原第15层)
+  - [-1, 1, DenseRepViTBlock_, [512, 512, 2, True]]           # 15 (原第16层)
+  - [[-1, 6], 1, Fuse_Features, [512]]                       # 16 (原第17层)
+  - [-1, 1, SPPF, [512, 5]]                                  # 17 (原第18层)
+  - [-1, 1, PSA, [512]]                                      # 18 (原第19层)
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]               # 19 (原第20层)
+  - [[-1, 13], 1, Concat, [1]]                               # 20 (原第21层, 连接14->13)
+  - [-1, 1, Conv, [256, 1, 1]]                               # 21 (原第22层)
+  - [-1, 1, Context_Exploration_Block, []]                   # 22 (原第23层)
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]               # 23 (原第24层)
+  - [[-1, 10], 1, Concat, [1]]                               # 24 (原第25层, 连接10不变)
+  - [-1, 1, Conv, [128, 1, 1]]                               # 25 (原第26层)
+  - [-1, 1, Context_Exploration_Block, []]                   # 26 (原第27层) P3/8
+  - [-1, 1, Conv, [256, 3, 2]]                               # 27 (原第28层)
+  - [[-1, 22], 1, Concat, [1]]                               # 28 (原第29层, 连接23->22)
+  - [-1, 1, Conv, [256, 1, 1]]                               # 29 (原第30层)
+  - [-1, 1, Context_Exploration_Block, []]                   # 30 (原第31层) P4/16
+  - [-1, 1, SCDown, [512, 3, 2]]                             # 31 (原第32层)
+  - [[-1, 18], 1, Concat, [1]]                               # 32 (原第33层, 连接19->18)
+  - [-1, 1, Conv, [512, 1, 1]]                               # 33 (原第34层)
+  - [-1, 1, Context_Exploration_Block, []]                   # 34 (原第35层) P5/32
+  - [[26, 30, 34], 1, v10Detect, [nc]]                       # 35 (连接27,31,35 -> 26,30,34)

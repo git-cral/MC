@@ -1,0 +1,72 @@
+nc: 4 # number of classes
+scales: # model compound scaling constants, i.e. 'model=yolov8n.yaml' will call yolov8.yaml with scale 'n'
+  # [depth, width, max_channels]
+  l: [1.00, 1.00, 1024] # YOLOv8l summary: 365 layers, 43691520 parameters, 43691504 gradients, 165.7 GFLOPs
+
+# YOLOv8.0n backbone
+backbone:
+  # Stem (emulating RepViT patch_embed)
+  - [-1, 1, Conv, [32, 3, 2]]          # 0-P1/2, c_out=32
+  - [-1, 1, Conv, [64, 3, 2]]          # 1-P2/4, c_out=64
+
+  # 阶段 1 (P2/4, c_in=64) -> 合并 3 个 RepViTBlock
+  # 原始: 3 个 RepViTBlock, c2=64, 第一个 use_se=True
+  # 新:   1 个 DenseRepViTBlock, constant=64, num_layers=3
+  # args:         [c2, constant, num_layers, use_se, stride, use_hs]
+  - [-1, 1, DenseRepViTBlock_, [64, 64, 3, False, 1, False]] # 2
+
+  # Stage 2 (P3/8, c_in=64, c_out=128)
+  # 下采样层保持不变
+  - [-1, 1, RepViTBlock, [128, True, 2, False]] # 3 (原第5层)
+  # 合并 3 个 RepViTBlock
+  # 原始: 3 个 RepViTBlock, c2=128, 第一个 use_se=True
+  # 新:   1 个 DenseRepViTBlock, constant=128, num_layers=3
+  # args:         [c2, constant, num_layers, use_se, stride, use_hs]
+  - [-1, 1, DenseRepViTBlock_, [128, 128, 3, False, 1, False]] # 4
+
+  # Stage 3 (P4/16, c_in=128, c_out=256)
+  # 下采样层保持不变
+  - [-1, 1, RepViTBlock, [256, False, 2]]       # 5 (原第9层)
+  # 合并 12 个 RepViTBlock
+  # 原始: 12 个 RepViTBlock, c2=256, use_se交替出现, use_hs=True
+  # 新:   1 个 DenseRepViTBlock, constant=256, num_layers=12
+  # Note: 对于 use_se, 我们取第一个块的配置(True)作为整个密集块的配置
+  # args:         [c2, constant, num_layers, use_se] (stride和hs使用默认值)
+  - [-1, 1, DenseRepViTBlock, [256, 256, 3, True]] # 6
+  - [-1, 1, DenseRepViTBlock, [256, 256, 3, True]] #7
+
+  # Stage 4 (P5/32, c_in=256, c_out=512)
+  # 下采样层保持不变
+  - [-1, 1, RepViTBlock, [512, False, 2]]       # 8 
+  # 合并 2 个 RepViTBlock
+  # 原始: 2 个 RepViTBlock, c2=512, 第一个 use_se=True
+  # 新:   1 个 DenseRepViTBlock, constant=512, num_layers=2
+  # args:         [c2, constant, num_layers, use_se]
+  - [-1, 1, DenseRepViTBlock_, [512, 512, 3, True]] # 9
+  
+  # Stage 4 的结尾保持不变
+  - [-1, 1, SPPF, [512, 5]]                      # 10                          
+  - [-1, 1, PSA, [512]]                          # 11
+
+  # 最终的 Head 配置 (v2)
+head:
+  # from, number, module, args
+  # 当前在第11层之后
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]           # 12
+  - [[-1, 7], 1, Concat, [1]]  # 从 backbone 的第 7 层连接 P4 特征 # 13
+  - [-1, 3, C2fCIB, [256, True]]                         # 14 (这一层是提供给后面 P4 分支的特征)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]           # 15
+  - [[-1, 4], 1, Concat, [1]]  # 从 backbone 的第 4 层连接 P3 特征 # 16
+  - [-1, 3, C2f, [128]]                                  # 17 (P3/8-small, 小目标检测头)
+
+  - [-1, 1, Conv, [256, 3, 2]]                           # 18
+  - [[-1, 14], 1, Concat, [1]] # 连接 head 内部的第 14 层特征    # 19
+  - [-1, 3, C2fCIB, [256, True]]                         # 20 (P4/16-medium, 中目标检测头)
+
+  - [-1, 1, SCDown, [512, 3, 2]]                         # 21
+  - [[-1, 11], 1, Concat, [1]] # 从 backbone 的第 11 层连接 P5 特征 # 22
+  - [-1, 3, C2fCIB, [512, True]]                         # 23 (P5/32-large, 大目标检测头)
+
+  # Detect 层连接三个检测头的输出
+  - [[17, 20, 23], 1, v10Detect, [nc]]  # Detect(P3, P4, P5)

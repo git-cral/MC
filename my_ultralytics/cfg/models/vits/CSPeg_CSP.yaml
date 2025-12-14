@@ -1,0 +1,43 @@
+nc: 4 # number of classes
+scales:
+  l: [1.00, 1.00, 1024]
+
+# Further simplified backbone (Correctly re-numbered)
+backbone:
+  - [-1, 1, Conv, [32, 3, 2]]          # 0-P1/2
+  - [-1, 1, EG_stem, []]               # 1
+  - [-1, 1, Conv, [64, 3, 2]]           # 2-P2/4
+  # Removed: [-1, 1, EGA, [64]]
+  - [-1, 1, CSP_DenseRepViTBlock_, [64, 3, True, 0.9, 1, False]] # 3 (was 4)
+  - [-1, 1, RepViTBlock, [128, True, 2, False]] # 4 (was 5)
+  - [-1, 1, CSP_DenseRepViTBlock_, [128, 3, True, 0.9, 1, False]] # 5 (was 6) -> P3 output
+  - [-1, 1, RepViTBlock, [256, True, 2]]       # 6 (was 7)
+  - [-1, 1, CSP_DenseRepViTBlock, [256, 3, True, 0.9, 1, True]] # 7 (was 8)
+  - [-1, 1, CSP_DenseRepViTBlock, [256, 3, True, 0.9, 1, True]] # 8 (was 9) -> P4 output
+  - [-1, 1, RepViTBlock, [512, True, 2]]       # 9 (was 10)
+  - [-1, 1, CSP_DenseRepViTBlock_, [512, 3, True, 0.9, 1, True]] # 10 (was 11)
+  - [-1, 1, SPPF, [512, 5]]            # 11 (was 12)
+  - [-1, 1, PSA, [512]]                # 12 (was 13) -> P5 output
+
+# YOLOv10 head (neck), with corrected layer references
+head:
+  # FPN Path (Top-down)
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]           # 13 (from layer 12)
+  - [[-1, 8], 1, Concat, [1]] # 14: cat Upsampled P5 + Backbone P4 (from layer 8)
+  - [-1, 3, C2fCIB, [256, True]] # 15: Neck P4 output
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]           # 16 (from layer 15)
+  - [[-1, 5], 1, Concat, [1]] # 17: cat Upsampled Neck P4 + Backbone P3 (from layer 5)
+  - [-1, 3, C2f, [128]] # 18: P3_out for Detect head
+
+  # PAN Path (Bottom-up)
+  - [-1, 1, Conv, [128, 3, 2]]                           # 19: Downsample P3_out
+  - [[-1, 15], 1, Concat, [1]]                           # 20: cat Downsampled P3_out + Neck P4 (from layer 15)
+  - [-1, 3, C2fCIB, [256, True]] # 21: P4_out for Detect head
+
+  - [-1, 1, SCDown, [256, 3, 2]]                         # 22: Downsample P4_out
+  - [[-1, 12], 1, Concat, [1]]                           # 23: cat Downsampled P4_out + Backbone P5 (from layer 12)
+  - [-1, 3, C2fCIB, [512, True]] # 24: P5_out for Detect head
+
+  # Detect Layer
+  - [[18, 21, 24], 1, Detect, [nc]]  # 25: Detect(P3, P4, P5)
